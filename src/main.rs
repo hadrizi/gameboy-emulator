@@ -1,19 +1,18 @@
+use std::path::Path;
+
 mod cpu;
 mod core;
+mod debugger;
 
-fn main() {
-    let r = core::register::Register::new(0xB668);
-    println!("{:X?}\n", r);
-
-    let f = core::flags::Flags::new();
-    println!("{:?}\n", f);
-
+fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut cpu = cpu::CPU::new();
-    println!("{:#X?}\n", cpu);
+    cpu.memory.load(&Path::new("D:\\utilities\\gb_roms\\blargg test roms\\cpu_instrs\\cpu_instrs.gb"));
+    let mut dbg = debugger::Debugger::new(cpu);
+    dbg.run()
 
-    cpu.memory.load(vec![0xFF, 0xF1, 0x10, 0x0A, 0x13]);
+    // while !cpu.stopped {
+    //     cpu.clock();
+    // }
 
-    loop {
-        cpu.clock();
-    }
+    // Ok(())
 }

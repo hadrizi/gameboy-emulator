@@ -23,6 +23,24 @@ impl Register {
         let _t = self.value & 0x00FF;
         _t as u8
     }
+
+    pub fn write_hi(&mut self, value: u8) {
+        // u16::from(value) << 8 | u16::from(self.lo())
+        self.value = (u16::from(value) << 8) | u16::from(self.lo());
+    }
+
+    pub fn write_lo(&mut self, value: u8) {
+        // u16::from(self.hi) << 8 | u16::from(value)
+        self.value = (u16::from(self.hi()) << 8) | u16::from(value)
+    }
+
+    pub fn inc(&mut self) {
+        self.value += 1;
+    }
+
+    pub fn dec(&mut self){
+        self.value -= 1;
+    }
 }
 
 impl fmt::Debug for Register {
@@ -40,7 +58,7 @@ impl Add<Register> for Register {
 
     fn add(self, other: Self) -> Self {
         Self {
-            value: self.value + other.value,
+            value: self.value.wrapping_add(other.value),
         }
     }
 }
@@ -50,7 +68,7 @@ impl Add<u16> for Register {
 
     fn add(self, other: u16) -> Self {
         Self {
-            value: self.value + other,
+            value: self.value.wrapping_add(other),
         }
     }
 }
@@ -60,7 +78,7 @@ impl Add<u8> for Register {
 
     fn add(self, other: u8) -> Self {
         Self {
-            value: self.value + other as u16,
+            value: self.value.wrapping_add(other as u16),
         }
     }
 }
@@ -68,7 +86,7 @@ impl Add<u8> for Register {
 impl AddAssign<Register> for Register {
     fn add_assign(&mut self, other: Self) {
         *self = Self {
-            value: self.value + other.value,
+            value: self.value.wrapping_add(other.value),
         };
     }
 }
@@ -76,7 +94,7 @@ impl AddAssign<Register> for Register {
 impl AddAssign<u16> for Register {
     fn add_assign(&mut self, other: u16) {
         *self = Self {
-            value: self.value + other,
+            value: self.value.wrapping_add(other),
         };
     }
 }
@@ -84,7 +102,15 @@ impl AddAssign<u16> for Register {
 impl AddAssign<u8> for Register {
     fn add_assign(&mut self, other: u8) {
         *self = Self {
-            value: self.value + other as u16,
+            value: self.value.wrapping_add(other as u16),
+        };
+    }
+}
+
+impl AddAssign<i8> for Register {
+    fn add_assign(&mut self, other: i8) {
+        *self = Self {
+            value: self.value.wrapping_add(other as u16),
         };
     }
 }
@@ -94,7 +120,7 @@ impl Sub<Register> for Register {
 
     fn sub(self, other: Self) -> Self {
         Self {
-            value: self.value - other.value,
+            value: self.value.wrapping_sub(other.value),
         }
     }
 }
@@ -104,7 +130,7 @@ impl Sub<u16> for Register {
 
     fn sub(self, other: u16) -> Self {
         Self {
-            value: self.value - other,
+            value: self.value.wrapping_sub(other),
         }
     }
 }
@@ -114,7 +140,17 @@ impl Sub<u8> for Register {
 
     fn sub(self, other: u8) -> Self {
         Self {
-            value: self.value - other as u16,
+            value: self.value.wrapping_sub(other as u16),
+        }
+    }
+}
+
+impl Sub<i8> for Register {
+    type Output = Self;
+
+    fn sub(self, other: i8) -> Self {
+        Self {
+            value: self.value.wrapping_sub(other as u16),
         }
     }
 }
@@ -159,5 +195,16 @@ mod tests {
 
         r1 = r1 - 0x05 as u8;
         assert_eq!(r1.value, 0x0000);
+    }
+
+    #[test]
+    fn test_register_write() {
+        let mut r1 = Register::new(0x0000);
+        r1.write_hi(0x13);
+        r1.write_lo(0xFF);
+
+        assert_eq!(r1.hi(), 0x13);
+        assert_eq!(r1.lo(), 0xFF);
+        assert_eq!(r1.value, 0x13FF);
     }
 }
