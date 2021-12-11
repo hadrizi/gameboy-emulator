@@ -2,11 +2,12 @@
 ## Roadmap
 - [X] CPU instructions
 - [X] CPU Debugger
+- [X] Timers
+- [X] Interrupts
 - [ ] Banking
-- [ ] Memory Debugger
-- [ ] Interrupts
 - [ ] PPU
-- [ ] Timers
+- [ ] DMA Transfer
+- [ ] Tests?
 
 ## Debugger
 TUI debugger
