@@ -2,6 +2,7 @@
 ## Roadmap
 - [X] CPU instructions
 - [X] CPU Debugger
+- [ ] Banking
 - [ ] Memory Debugger
 - [ ] Interrupts
 - [ ] PPU
