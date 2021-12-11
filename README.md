@@ -10,7 +10,7 @@
 
 ## Debugger
 TUI debugger
-![image](https://user-images.githubusercontent.com/28650696/145019390-cf798df5-3a7f-48e6-8731-2c0ebbb846e1.png)
+![image](https://user-images.githubusercontent.com/28650696/145680669-e4b87233-f5c7-4eb3-958d-96101707fe60.png)
 ### Features
 - [X] Assembly
 - [X] Basic code flow controls
