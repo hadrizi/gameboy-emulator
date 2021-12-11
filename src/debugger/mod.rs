@@ -145,7 +145,9 @@ impl Debugger {
                         rect.render_widget(register, registers_chunks[0]);
                         rect.render_widget(stack, registers_chunks[1]);
                     },
-                    MenuItem::VRAM => { },
+                    MenuItem::VRAM => { 
+                        ui::build_vram(&self.cpu, &chunks[1], rect);
+                    },
                     MenuItem::Memory => { }
                 }
             })?;

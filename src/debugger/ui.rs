@@ -1,5 +1,5 @@
 use indexmap::IndexMap;
-use tui::{widgets::{Paragraph, Block, Borders, BorderType, List, ListItem}, text::{Spans, Span}, style::{Style, Color, Modifier}, layout::Alignment};
+use tui::{widgets::{Paragraph, Block, Borders, BorderType, List, ListItem, canvas::{Canvas, Line, MapResolution, Map, Rectangle, Context, Points}, Widget}, text::{Spans, Span}, style::{Style, Color, Modifier}, layout::{Alignment, Rect}, backend::Backend, Frame, symbols::Marker};
 
 use crate::cpu::{CPU, Flag};
 
@@ -7,11 +7,8 @@ use crate::cpu::{CPU, Flag};
 pub fn render_cpu<'a>(
     disas: &'a IndexMap<u16, String>, asm_height: u16, cpu: &CPU, 
 ) -> ((List<'a>, usize), Paragraph<'a>, Paragraph<'a>) {
-    let current: usize = if asm_height % 2 == 1 {
-        asm_height as usize / 2 - 1
-    } else {
-        asm_height as usize / 2
-    };
+    let current: usize = asm_height as usize / 2;
+
     let asm = Block::default()
         .borders(Borders::ALL)
         .style(Style::default().fg(Color::White))
@@ -55,6 +52,10 @@ pub fn render_cpu<'a>(
             .add_modifier(Modifier::BOLD)      
     );
 
+    let is_timers = ((cpu.memory.tac() >> 2) & 1) == 1;
+    let freqs = [1024, 16, 64, 256];
+    let freq_idx = cpu.memory.tac() & 3;
+    let freq = freqs[freq_idx as usize];
     let p1 = Paragraph::new(vec![
         Spans::from(vec![
             Span::raw(format!("PC ${:04X}", cpu.pc.value)),
@@ -107,6 +108,24 @@ pub fn render_cpu<'a>(
             Span::styled("C", Style::default().fg(if cpu.get_flag(Flag::C) { Color::Green } else { Color::LightRed })),
             Span::raw(" "),
             Span::styled("H", Style::default().fg(if cpu.get_flag(Flag::H) { Color::Green } else { Color::LightRed })),
+        ]),
+        Spans::from(vec![
+            Span::raw("Timers: "),
+            Span::styled(
+                if is_timers { "ENABLED " } else { "DISABLED" },
+                Style::default().fg(if is_timers { Color::Green } else { Color::LightRed })
+            ),
+            Span::raw(format!("     Frequency: {}", &freq)),
+        ]),
+        Spans::from(vec![
+            Span::styled("DIV", Style::default().fg(Color::DarkGray)),
+            Span::styled(format!(" ${:02X}", cpu.memory.div()), Style::default().fg(Color::LightYellow)),
+            Span::raw("     "),
+            Span::styled("TIMA", Style::default().fg(Color::DarkGray)),
+            Span::styled(format!(" ${:02X}", cpu.memory.tima()), Style::default().fg(Color::LightYellow)),
+            Span::raw("     "),
+            Span::styled("TMA", Style::default().fg(Color::DarkGray)),
+            Span::styled(format!(" ${:02X}", cpu.memory.tma()), Style::default().fg(Color::LightYellow)),
         ]),
     ])
         .alignment(Alignment::Left)
@@ -167,4 +186,34 @@ pub fn build_cpu_controls<'a>() -> Paragraph<'a> {
                 .border_type(BorderType::Plain),
         );
     p
+}
+
+pub fn build_vram<'a, B: Backend>(cpu: &CPU, chunk: &Rect, be: &mut Frame<B>){
+    let canvas = Canvas::default()
+        .block(Block::default().title("VRAM").borders(Borders::ALL)).marker(Marker::Braille)
+        // 19x21 = 152x168
+        .x_bounds([0., 152.0])
+        .y_bounds([0., 168.0])
+        .paint(|ctx| {
+            let colors = [Color::White, Color::Gray, Color::DarkGray, Color::Black];
+            let mut base = 0x8000;
+            let (mut x, y) = (152.0, 168.0);
+
+            for j in 0..8 {
+                let lower = cpu.memory.read(base);
+                base += 1;
+                let upper = cpu.memory.read(base);
+                for i in 0..8 {
+                    // C3 => 11000011
+                    // 20 => 00100000
+                    let c = 7 - i;
+                    let color_idx = (((upper >> c) & 1) << 1) | ((lower >> c) & 1);
+                    ctx.draw(&Points {
+                        coords: &[(x + i as f64, y + j as f64)],
+                        color: colors[color_idx as usize],
+                    });
+                }
+            }
+        });
+        be.render_widget(canvas, *chunk)
 }

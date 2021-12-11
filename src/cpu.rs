@@ -3,7 +3,7 @@ use indexmap::IndexMap;
 
 use crate::core::{
     register::Register, 
-    memory::Memory, 
+    memory::{Memory, self}, 
     opcodes::InstrucionTarget, 
     opcodes::Instruction, 
     table_builder::{build_table, build_prefix, TABLE_SIZE},
@@ -31,6 +31,11 @@ pub struct CPU {
 
     pub opcode_table: [(Instruction, i32); TABLE_SIZE],
     pub prefix_table: [(Instruction, i32); TABLE_SIZE],
+
+    div_cycles: i32,
+    tima_cycles: i32,
+
+    ei_executed: bool
 }
 
 pub enum Flag {
@@ -38,9 +43,9 @@ pub enum Flag {
 }
 
 // TODO: implement Deafault trait
-impl CPU {    
+impl CPU {
     pub fn new() -> CPU {
-        let cpu = CPU{
+        let mut cpu = CPU{
             reg_af:         Register::new(0x01B0),
             reg_bc:         Register::new(0x0013),
             reg_de:         Register::new(0x00D8),
@@ -48,7 +53,7 @@ impl CPU {
             pc:             Register::new(0x0100),
             stack_pointer:  Register::new(0xFFFE),
 
-            ime: true,
+            ime: false,
             
             memory: Memory::new(),
             
@@ -57,22 +62,113 @@ impl CPU {
             prefix_table: build_prefix(),
 
             halted: false,
-            stopped: false
+            stopped: false,
+
+            div_cycles: 0,
+            tima_cycles: 0,
+
+            ei_executed: false
         };
+        cpu.memory.reset_hardware_registers();
         cpu
     }
     
     pub fn clock(&mut self) {
         if self.cycles == 0 {
-            let op = self.memory[self.pc];
+            if !self.ei_executed {
+                self.interrupts();
+            } else { self.ei_executed = false; }
+
+            let op = self.memory.read(self.pc.value as usize);
             self.pc.inc();
 
             let instruction = self.opcode_table[op as usize];
             self.execute(instruction.0);
             self.cycles = instruction.1;
         }
-        
+        self.cycle();
+    }
+
+    fn cycle(&mut self) {
         self.cycles -= 1;
+        self.div_cycles += 1;
+        self.tima_cycles += 1;
+        self.timers();
+    }
+
+    fn cycle_n(&mut self, n: i32) {
+        self.cycles = n;
+        while self.cycles != 0 { self.cycle(); }
+    }
+
+    fn timers(&mut self) {
+        if self.div_cycles == 256 { 
+            self.memory.inc_div(); 
+            self.div_cycles = 0;
+        }
+
+        let enabled = ((self.memory.tac() >> 2) & 1) == 1;
+        if enabled {
+            let freqs = [1024, 16, 64, 256];
+            let freq_idx = self.memory.tac() & 3;
+            if self.tima_cycles == freqs[freq_idx as usize] {
+                self.memory.inc_tima();
+                self.tima_cycles = 0;
+                if self.memory.tima() == 0 {
+                    self.memory.reset_tima();
+                    // TODO: Timer interrupt
+                }
+            }
+        }
+        
+    }
+
+    /// Interrupt Service Routine
+    fn interrupts(&mut self) {
+        if self.ime {
+            // The entire ISR should last a total of 5 M-cycles(5 * 4 = 20 cycles)
+            // 1. 2 M-cycles pass at the begining of ISR
+            // 2. 3 M-cycles pass when call to the interrupt occurs 
+            self.cycle_n(8);
+
+            // VBlank
+            if self.memory.is_iflag_set(0) && self.memory.is_ie_set(0) {
+                self.handle_interrupt(0);
+            }
+
+            // LCD STAT
+            if self.memory.is_iflag_set(1) && self.memory.is_ie_set(1) {
+                self.handle_interrupt(1);
+            }
+
+            // Timer
+            if self.memory.is_iflag_set(2) && self.memory.is_ie_set(2) {
+                self.handle_interrupt(2);
+            }   
+
+            // Serial
+            if self.memory.is_iflag_set(3) && self.memory.is_ie_set(3) {
+                self.handle_interrupt(3);
+            }
+
+            // Joypad
+            if self.memory.is_iflag_set(4) && self.memory.is_ie_set(4) {
+                self.handle_interrupt(4);
+            }
+        }
+    }
+
+    fn handle_interrupt(&mut self, id: i32) {
+        self.cycle_n(12);
+        self.memory.reset_iflag_bit(id);
+        match id {
+            0 => self._call(0x0040),
+            1 => self._call(0x0048),
+            2 => self._call(0x0050),
+            3 => self._call(0x0058),
+            4 => self._call(0x0060),
+            _ => panic!("unhandled interrupt at {:04X}", self.pc.value)
+        }
     }
 
     pub fn disassemble(&self) -> IndexMap<u16, String> {
@@ -80,7 +176,7 @@ impl CPU {
 
         let mut i: usize = 0;
         while i < 0xFFFF {
-            let op = self.memory[i];
+            let op = self.memory.read(i);
             let current = i;
             let instruction = self.opcode_table[op as usize];
             let mut inst = instruction.0.to_string();
@@ -92,19 +188,19 @@ impl CPU {
             
             if inst.contains("u8") {
                 i += 1;
-                let v = self.memory[i];
+                let v = self.memory.read(i);
                 inst = inst.replace("u8", format!("${:02X}", v).as_str()); 
             };
             if inst.contains("i8") {
                 i += 1;
-                let v = self.memory[i];
+                let v = self.memory.read(i);
                 inst = inst.replace("i8", format!("${:02X}", v).as_str()); 
             };
             if inst.contains("u16") || inst.contains("a16") {
                 i += 1;
-                let mut v: u16 = self.memory[i] as u16;
+                let mut v: u16 = self.memory.read(i) as u16;
                 i += 1;
-                v |= (self.memory[i] as u16) << 8;
+                v |= (self.memory.read(i) as u16) << 8;
                 if inst.contains(" u16") {
                     inst = inst.replace("u16", format!("${:04X}", v).as_str()); 
                 } else {
@@ -150,21 +246,26 @@ impl CPU {
     }
 
     fn _push(&mut self, value: Register) {
-        self.memory[self.stack_pointer] = value.hi();
+        self.memory.write(self.stack_pointer.value as usize, value.hi());
         self.stack_pointer.dec();
-        self.memory[self.stack_pointer] = value.lo();
+        self.memory.write(self.stack_pointer.value as usize, value.lo());
         self.stack_pointer.dec();
     }
 
     fn _pop(&mut self) -> Register {
         let mut v = Register::new(0);
         self.stack_pointer.inc();
-        v.write_lo(self.memory[self.stack_pointer]);
+        v.write_lo(self.memory.read(self.stack_pointer.value as usize));
         self.stack_pointer.inc();
-        v.write_hi(self.memory[self.stack_pointer]);
+        v.write_hi(self.memory.read(self.stack_pointer.value as usize));
         v
     }
     
+    fn _call(&mut self, destination: u16) {
+        self._push(self.pc);
+        self.pc.value = destination;
+    }
+
     /// Returns u8 value representing Flag register in accordance with the provided conditions
     /// ### Example
     /// ```
@@ -220,24 +321,23 @@ impl CPU {
 
     /// Returns immediate unsigned 8 bit value
     fn get_imm_u8(&mut self) -> u8 {
-        let v = self.memory[self.pc];
+        let v = self.memory.read(self.pc.value as usize);
         self.pc.inc();
         return v
     }
 
     /// Returns immediate signed 8 bit value
     fn get_imm_i8(&mut self) -> i8 {
-        let v = self.memory[self.pc];
+        let v = self.memory.read(self.pc.value as usize);
         self.pc.inc();
         return v as i8
     }
     
     /// Returns immediate 16 bit value
     fn get_imm_16(&mut self) -> u16 {
-        // let v: u16 = (self.memory[self.pc] << 8) as u16;
-        let mut v: u16 = self.memory[self.pc] as u16;
+        let mut v: u16 = self.memory.read(self.pc.value as usize) as u16;
         self.pc.inc();
-        v |= (self.memory[self.pc] as u16) << 8;
+        v |= (self.memory.read(self.pc.value as usize) as u16) << 8;
         self.pc.inc();
         return v
     }
@@ -252,22 +352,22 @@ impl CPU {
             InstrucionTarget::E => self.reg_de.write_lo(value as u8),
             InstrucionTarget::H => self.reg_hl.write_hi(value as u8),
             InstrucionTarget::L => self.reg_hl.write_lo(value as u8),
-            InstrucionTarget::HLMem => self.memory[self.reg_hl] = value as u8,
-            InstrucionTarget::CMem => self.memory[0xFF00+self.reg_bc.lo() as u16] = value as u8,
+            InstrucionTarget::HLMem => self.memory.write(self.reg_hl.value as usize, value as u8),
+            InstrucionTarget::CMem => self.memory.write(0xFF00+self.reg_bc.lo() as usize, value as u8),
             InstrucionTarget::A8 => {
                 let offset = self.get_imm_u8() as u16;
-                self.memory[0xFF00 + offset] = value as u8;
+                self.memory.write(0xFF00 + offset as usize, value as u8);
             },
             InstrucionTarget::AF => self.reg_af.value = value,
             InstrucionTarget::BC => self.reg_bc.value = value,
             InstrucionTarget::DE => self.reg_de.value = value,
             InstrucionTarget::HL => self.reg_hl.value = value,
             InstrucionTarget::SP => self.stack_pointer.value = value,
-            InstrucionTarget::BCMem => self.memory[self.reg_bc] = value as u8,
-            InstrucionTarget::DEMem => self.memory[self.reg_de] = value as u8,
+            InstrucionTarget::BCMem => self.memory.write(self.reg_bc.value as usize, value as u8),
+            InstrucionTarget::DEMem => self.memory.write(self.reg_de.value as usize, value as u8),
             InstrucionTarget::A16 => {
                 let addr = self.get_imm_16();
-                self.memory[addr] = value as u8;
+                self.memory.write(addr as usize, value as u8);
             },
             InstrucionTarget::PC => self.pc.value = value,
             _ => panic!("Unhandled write_target to {}", target)
@@ -285,24 +385,24 @@ impl CPU {
             InstrucionTarget::E => self.reg_de.lo() as u16,
             InstrucionTarget::H => self.reg_hl.hi() as u16,
             InstrucionTarget::L => self.reg_hl.lo() as u16,
-            InstrucionTarget::HLMem => self.memory[self.reg_hl.value as usize] as u16,
-            InstrucionTarget::CMem => self.memory[0xFF00 + self.reg_bc.lo() as u16] as u16,
+            InstrucionTarget::HLMem => self.memory.read(self.reg_hl.value as usize) as u16,
+            InstrucionTarget::CMem => self.memory.read(0xFF00 + self.reg_bc.lo() as usize) as u16,
             InstrucionTarget::U8 => self.get_imm_u8() as u16,
             InstrucionTarget::A8 => {
                 let offset = self.get_imm_u8() as u16;
-                self.memory[0xFF00 + offset] as u16
+                self.memory.read(0xFF00 + offset as usize) as u16
             },
             InstrucionTarget::AF => self.reg_af.value,
             InstrucionTarget::BC => self.reg_bc.value,
             InstrucionTarget::DE => self.reg_de.value,
             InstrucionTarget::HL => self.reg_hl.value,
             InstrucionTarget::SP => self.stack_pointer.value,
-            InstrucionTarget::BCMem => self.memory[self.reg_bc.value] as u16,
-            InstrucionTarget::DEMem => self.memory[self.reg_de.value] as u16,
+            InstrucionTarget::BCMem => self.memory.read(self.reg_bc.value as usize) as u16,
+            InstrucionTarget::DEMem => self.memory.read(self.reg_de.value as usize) as u16,
             InstrucionTarget::U16 => self.get_imm_16(),
             InstrucionTarget::A16 => {
                 let addr = self.get_imm_16();
-                self.memory[addr] as u16
+                self.memory.read(addr as usize) as u16
             },
             InstrucionTarget::I8 => {
                 let v = self.get_imm_i8();
@@ -719,15 +819,11 @@ impl CPU {
             InstrucionTarget::NZCond |
             InstrucionTarget::NCCond => {
                 if self.read_target(cond) == 1 {
-                    self._push(self.pc);
-                    self.pc.value = destination;
+                    self._call(destination);
                     self.cycles += 12;
                 }
             },
-            InstrucionTarget::Blank => {
-                self._push(self.pc);
-                self.pc.value = destination
-            },
+            InstrucionTarget::Blank => { self._call(destination); },
             _ => panic!("unhandled call condition at {:X}", self.pc.value),
         }
     }
@@ -991,7 +1087,7 @@ impl CPU {
             Instruction::HALT => self.halt(),
             Instruction::STOP => self.stop(),
             Instruction::DI => self.di(),
-            Instruction::EI => self.ei(),
+            Instruction::EI => { self.ei(); self.ei_executed = true; },
             Instruction::JP(cond, dest) => self.jp(cond, dest, false),
             Instruction::JR(cond, dest) => self.jp(cond, dest, true),
             Instruction::CALL(cond, dest) => self.call(cond, dest),
