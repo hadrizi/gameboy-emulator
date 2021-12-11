@@ -4,10 +4,17 @@
 - [X] CPU Debugger
 - [X] Timers
 - [X] Interrupts
-- [ ] Banking
-- [ ] PPU
 - [ ] DMA Transfer
+- [ ] PPU
+- [ ] Banking
+- [ ] Joypad
+- [ ] Sound 
 - [ ] Tests?
+
+## Experimental features
+- [ ] Color mode(basically CGB compatibility)
+- [ ] SGB functions
+- [ ] `HALT` bug
 
 ## Debugger
 TUI debugger
