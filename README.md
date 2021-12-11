@@ -7,14 +7,14 @@
 - [ ] DMA Transfer
 - [ ] PPU
 - [ ] Banking
+- [ ] `HALT` bug
 - [ ] Joypad
-- [ ] Sound 
+- [ ] Sound
 - [ ] Tests?
 
 ## Experimental features
 - [ ] Color mode(basically CGB compatibility)
 - [ ] SGB functions
-- [ ] `HALT` bug
 
 ## Debugger
 TUI debugger
